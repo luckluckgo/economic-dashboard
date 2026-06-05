@@ -1,0 +1,14 @@
+{
+  "name": "economic-dashboard",
+  "version": "1.0.0",
+  "description": "한국 경제지표 비교 대시보드",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}

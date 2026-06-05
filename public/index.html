@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>경제지표 비교 대시보드</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <style>
+    :root {
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --text: #1e293b;
+      --muted: #64748b;
+      --border: #e2e8f0;
+      --accent: #3b82f6;
+      --radius: 12px;
+      --shadow: 0 1px 3px rgba(0,0,0,.08);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard', sans-serif;
+      background: var(--bg); color: var(--text); line-height: 1.6;
+    }
+    .container { max-width: 1280px; margin: 0 auto; padding: 20px 20px 12px; }
+
+    header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    header h1 { font-size: 20px; font-weight: 700; letter-spacing: -.3px; }
+    header .sub { font-size: 13px; color: var(--muted); }
+
+    .period-bar { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+    .period-btn {
+      padding: 7px 16px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--card); font-size: 13px; font-weight: 500; cursor: pointer;
+      transition: all .12s;
+    }
+    .period-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .period-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+    .indicator-panel {
+      background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+      padding: 14px 16px; margin-bottom: 16px;
+    }
+    .cat-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+    .cat-row:last-child { margin-bottom: 0; }
+    .cat-label {
+      font-size: 11px; font-weight: 600; color: var(--muted); background: #f1f5f9;
+      padding: 5px 10px; border-radius: 6px; white-space: nowrap; min-width: 68px;
+      text-align: center; margin-top: 1px; flex-shrink: 0;
+    }
+    .cat-toggles { display: flex; gap: 5px; flex-wrap: wrap; }
+    .ind-btn {
+      display: flex; align-items: center; gap: 5px;
+      padding: 4px 10px; border: 1.5px solid var(--border); border-radius: 6px;
+      background: var(--card); font-size: 12px; font-weight: 500; cursor: pointer;
+      transition: all .12s; user-select: none; white-space: nowrap;
+    }
+    .ind-btn .dot { width: 8px; height: 8px; border-radius: 50%; opacity: .35; transition: opacity .12s; flex-shrink: 0; }
+    .ind-btn.active { border-color: var(--c); background: color-mix(in srgb, var(--c) 7%, white); }
+    .ind-btn.active .dot { opacity: 1; }
+    .ind-btn:hover { border-color: var(--c); }
+
+    .chart-wrap {
+      background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+      padding: 16px; margin-bottom: 16px; position: relative; height: 440px;
+    }
+    .chart-wrap canvas { width: 100% !important; }
+    .ext-tooltip {
+      position: absolute; top: 12px; pointer-events: none;
+      background: rgba(15,23,42,.92); color: #fff; border-radius: 8px;
+      padding: 10px 12px; font-size: 12px; line-height: 1.7;
+      opacity: 0; transition: opacity .12s;
+      z-index: 20; white-space: nowrap;
+      box-shadow: 0 4px 12px rgba(0,0,0,.15);
+    }
+    .ext-tooltip.show { opacity: 1; }
+    .ext-tooltip .tt-title { font-weight: 600; margin-bottom: 2px; }
+    .ext-tooltip .tt-row { display: flex; align-items: center; gap: 4px; }
+    .ext-tooltip .tt-row.dim { opacity: .4; }
+    .ext-tooltip .tt-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .loading {
+      position: absolute; inset: 0; background: rgba(255,255,255,.8);
+      display: flex; align-items: center; justify-content: center;
+      border-radius: var(--radius); z-index: 10; opacity: 0; pointer-events: none; transition: opacity .2s;
+    }
+    .loading.on { opacity: 1; pointer-events: auto; }
+    .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; margin-bottom: 16px; }
+    .scard {
+      background: var(--card); border-radius: 10px; box-shadow: var(--shadow);
+      padding: 12px 14px; border-left: 3px solid var(--c, var(--border));
+    }
+    .scard .sl { font-size: 11px; color: var(--muted); font-weight: 500; }
+    .scard .sv { font-size: 18px; font-weight: 700; letter-spacing: -.4px; margin-top: 2px; }
+    .scard .sv.up { color: #dc2626; } .scard .sv.dn { color: #2563eb; } .scard .sv.zr { color: var(--muted); }
+    .scard .sd { font-size: 12px; font-weight: 600; margin-top: 1px; }
+    .scard .sd.up { color: #dc2626; } .scard .sd.dn { color: #2563eb; } .scard .sd.zr { color: var(--muted); }
+    .scard .sr { font-size: 12px; color: var(--muted); margin-top: 1px; }
+    .scard .se { font-size: 11px; color: #ef4444; }
+
+    .nps-box {
+      background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+      padding: 14px 16px; border-left: 3px solid #8b5cf6; margin-bottom: 16px; display: none;
+    }
+    .nps-box h3 { font-size: 13px; font-weight: 600; color: #8b5cf6; margin-bottom: 4px; }
+    .nps-box p { font-size: 12px; color: var(--muted); line-height: 1.7; }
+    .nps-box textarea {
+      width: 100%; height: 80px; padding: 8px; border: 1px solid var(--border); border-radius: 6px;
+      font-family: 'SF Mono', monospace; font-size: 11px; resize: vertical; margin: 8px 0 6px;
+    }
+    .nps-box button { padding: 5px 14px; background: #8b5cf6; color: #fff; border: none; border-radius: 6px; font-size: 12px; cursor: pointer; }
+    .nps-box .msg { margin-top: 6px; font-size: 11px; }
+
+    footer { text-align: center; padding: 8px; font-size: 11px; color: var(--muted); }
+
+    @media (max-width: 640px) {
+      .container { padding: 14px 10px; }
+      .chart-wrap { height: 320px; padding: 10px; }
+      .cards { grid-template-columns: repeat(2, 1fr); }
+      .cat-label { min-width: 56px; font-size: 10px; }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>경제지표 비교 대시보드</h1>
+    <span class="sub">기간 시작일 대비 변화율(%) 비교</span>
+  </header>
+
+  <div class="period-bar" id="periodBar">
+    <button class="period-btn" data-p="1w">1주</button>
+    <button class="period-btn active" data-p="1m">1개월</button>
+    <button class="period-btn" data-p="3m">3개월</button>
+    <button class="period-btn" data-p="6m">6개월</button>
+    <button class="period-btn" data-p="1y">1년</button>
+  </div>
+
+  <div class="indicator-panel" id="indPanel"></div>
+
+  <div class="chart-wrap" id="chartWrap">
+    <canvas id="chart"></canvas>
+    <div class="ext-tooltip" id="extTooltip"></div>
+    <div class="loading" id="loader"><div class="spinner"></div></div>
+  </div>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="nps-box" id="npsBox">
+    <h3>국민연금 주식비중 데이터</h3>
+    <p>NPS 기금운용본부 월별 공시 데이터를 JSON으로 입력하세요. 출처: fund.nps.or.kr</p>
+    <textarea id="npsIn" placeholder='[
+  { "date": "2026-01-31", "ratio": 54.8 },
+  { "date": "2026-02-28", "ratio": 55.1 },
+  { "date": "2026-03-31", "ratio": 54.5 }
+]'></textarea>
+    <button onclick="saveNps()">저장</button>
+    <div class="msg" id="npsMsg"></div>
+  </div>
+
+  <footer>데이터: Yahoo Finance · NPS 공시 · 5분 캐시</footer>
+</div>
+
+<script>
+const COLORS = {
+  kospi:'#DC2626', kosdaq:'#F87171',
+  sp500:'#2563EB', nasdaq:'#7C3AED', nikkei:'#EC4899', hsi:'#EA580C', shanghai:'#991B1B', dax:'#059669', sox:'#6D28D9',
+  kr_bond2y:'#93C5FD', kr_bond3y:'#60A5FA', kr_bond5y:'#3B82F6', kr_bond10y:'#2563EB', kr_bond30y:'#1D4ED8',
+  us2y:'#67E8F9', us5y:'#22D3EE', us10y:'#0891B2', us30y:'#0E7490',
+  oil:'#D97706', brent:'#92400E', gold:'#CA8A04', silver:'#64748B', natgas:'#C2410C', copper:'#78350F',
+  usdkrw:'#10B981', dxy:'#0D9488', eurusd:'#0284C7', usdjpy:'#84CC16', usdcny:'#047857',
+  btc:'#EA580C', eth:'#4F46E5',
+  vix:'#BE185D',
+  kr_base_rate:'#7C3AED', unemployment:'#E11D48', cpi:'#F97316',
+  us_base_rate:'#A78BFA', us_unemployment:'#FB7185', us_cpi:'#FDBA74',
+  nps:'#8B5CF6',
+};
+
+const UNIT = {
+  kospi:'pt', kosdaq:'pt', sp500:'pt', nasdaq:'pt', nikkei:'pt', hsi:'pt', shanghai:'pt', dax:'pt', sox:'pt',
+  kr_bond2y:'%', kr_bond3y:'%', kr_bond5y:'%', kr_bond10y:'%', kr_bond30y:'%',
+  us2y:'%', us5y:'%', us10y:'%', us30y:'%',
+  oil:'$', brent:'$', gold:'$', silver:'$', natgas:'$', copper:'$',
+  usdkrw:'₩', dxy:'', eurusd:'', usdjpy:'¥', usdcny:'¥',
+  btc:'$', eth:'$',
+  vix:'',
+  kr_base_rate:'%', unemployment:'%', cpi:'%',
+  us_base_rate:'%', us_unemployment:'%', us_cpi:'%',
+  nps:'%',
+};
+
+let period = '1m';
+let active = new Set();
+let chart = null;
+let indicatorConfig = [];
+
+async function init() {
+  const resp = await fetch('/api/config');
+  indicatorConfig = await resp.json();
+  active = new Set(indicatorConfig.filter(c => c.defaultOn).map(c => c.key));
+  buildPanel();
+  initPeriod();
+  initChart();
+  loadNpsIn();
+  fetchData();
+}
+
+function buildPanel() {
+  const panel = document.getElementById('indPanel');
+  const cats = {};
+  indicatorConfig.forEach(c => {
+    (cats[c.category] ??= []).push(c);
+  });
+
+  panel.innerHTML = `<div class="cat-row">
+      <span class="cat-label" style="cursor:pointer;background:#e2e8f0" id="clearAll">전체 끄기</span>
+    </div>` + Object.entries(cats).map(([cat, items]) => `
+    <div class="cat-row">
+      <span class="cat-label">${cat}</span>
+      <div class="cat-toggles">
+        ${items.map(it => {
+          const on = active.has(it.key);
+          return `<div class="ind-btn ${on ? 'active' : ''}" style="--c:${COLORS[it.key]}" data-k="${it.key}">
+            <span class="dot" style="background:${COLORS[it.key]}"></span>${it.name}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+  `).join('');
+
+  document.getElementById('clearAll').addEventListener('click', () => {
+    active.clear();
+    panel.querySelectorAll('.ind-btn.active').forEach(b => b.classList.remove('active'));
+    document.getElementById('npsBox').style.display = 'none';
+    fetchData();
+  });
+
+  panel.querySelectorAll('.ind-btn').forEach(el => {
+    el.addEventListener('click', () => {
+      const k = el.dataset.k;
+      if (active.has(k)) { active.delete(k); el.classList.remove('active'); }
+      else { active.add(k); el.classList.add('active'); }
+      if (k === 'nps') document.getElementById('npsBox').style.display = active.has('nps') ? 'block' : 'none';
+      fetchData();
+    });
+  });
+}
+
+function initPeriod() {
+  document.querySelectorAll('.period-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelector('.period-btn.active')?.classList.remove('active');
+      btn.classList.add('active');
+      period = btn.dataset.p;
+      fetchData();
+    });
+  });
+}
+
+function externalTooltip({ chart: ch, tooltip }) {
+  const el = document.getElementById('extTooltip');
+  if (tooltip.opacity === 0) {
+    el.classList.remove('show');
+    return;
+  }
+
+  const dps = tooltip.dataPoints;
+  if (!dps?.length) return;
+
+  const dateStr = new Date(dps[0].parsed.x)
+    .toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  const rows = dps.map(dp => {
+    const ds = dp.dataset;
+    const v = dp.parsed.y;
+    const delta = dp.raw.delta;
+    const k = ds._key;
+    const dim = ds._dimmed;
+    const vS = v >= 0 ? '+' : '';
+    const dS = delta >= 0 ? '+' : '';
+    return `<div class="tt-row ${dim ? 'dim' : ''}">
+      <span class="tt-dot" style="background:${ds._color}"></span>
+      ${ds.label}: ${vS}${v.toFixed(2)}% | 직전 ${dS}${delta.toFixed(2)}%  (${fmtRaw(k, dp.raw.raw)})
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `<div class="tt-title">${dateStr}</div>${rows}`;
+  el.classList.add('show');
+
+  const area = ch.chartArea;
+  const mid = (area.left + area.right) / 2;
+  const ttW = el.offsetWidth;
+  if (tooltip.caretX < mid) {
+    el.style.left = (area.right - ttW) + 'px';
+  } else {
+    el.style.left = area.left + 'px';
+  }
+}
+
+function initChart() {
+  const zeroLine = {
+    id: 'zeroLine',
+    beforeDraw(ch) {
+      const ys = ch.scales.y;
+      if (!ys) return;
+      const y = ys.getPixelForValue(0);
+      if (y < ys.top || y > ys.bottom) return;
+      const ctx = ch.ctx;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(ch.chartArea.left, y);
+      ctx.lineTo(ch.chartArea.right, y);
+      ctx.strokeStyle = 'rgba(0,0,0,.18)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 4]);
+      ctx.stroke();
+      ctx.restore();
+    },
+  };
+
+  const highlightPlugin = {
+    id: 'highlightNearest',
+    _nearest: null,
+    afterEvent(ch, args) {
+      const evt = args.event;
+      const datasets = ch.data.datasets;
+      if (evt.type === 'mouseout' || !ch.tooltip?.dataPoints?.length) {
+        this._nearest = null;
+        let dirty = false;
+        datasets.forEach(ds => { if (ds._dimmed) { ds._dimmed = false; dirty = true; } });
+        if (dirty) args.changed = true;
+        return;
+      }
+      let nearest = { idx: -1, di: -1, dist: Infinity };
+      ch.data.datasets.forEach((ds, dsIdx) => {
+        const meta = ch.getDatasetMeta(dsIdx);
+        if (meta.hidden) return;
+        meta.data.forEach((el, ptIdx) => {
+          const dx = el.x - evt.x;
+          const dy = el.y - evt.y;
+          const d = dx * dx + dy * dy;
+          if (d < nearest.dist) nearest = { idx: dsIdx, di: ptIdx, dist: d };
+        });
+      });
+      this._nearest = nearest.idx !== -1 ? nearest : null;
+      datasets.forEach((ds, i) => {
+        ds._dimmed = (nearest.idx !== -1 && i !== nearest.idx);
+      });
+      args.changed = true;
+      externalTooltip({ chart: ch, tooltip: ch.tooltip });
+    },
+    afterDatasetsDraw(ch) {
+      if (!this._nearest) return;
+      const { idx, di } = this._nearest;
+      const el = ch.getDatasetMeta(idx).data[di];
+      if (!el) return;
+      const color = ch.data.datasets[idx]._color;
+      const ctx = ch.ctx;
+      const dpr = window.devicePixelRatio || 1;
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.beginPath();
+      ctx.arc(el.x, el.y, 5, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#fff';
+      ctx.stroke();
+      ctx.restore();
+    },
+  };
+
+  chart = new Chart(document.getElementById('chart').getContext('2d'), {
+    type: 'line',
+    data: { datasets: [] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: { usePointStyle: true, pointStyle: 'circle', padding: 14, font: { size: 12, weight: '500' } },
+        },
+        tooltip: {
+          enabled: false,
+          external: externalTooltip,
+        },
+      },
+      scales: {
+        x: {
+          type: 'time',
+          time: { minUnit: 'day', displayFormats: { day:'MM/dd', week:'MM/dd', month:'yyyy/MM' } },
+          grid: { display: false },
+          ticks: { font: { size: 11 }, maxTicksLimit: 10 },
+        },
+        y: {
+          grid: { color: 'rgba(0,0,0,.05)' },
+          ticks: { font: { size: 11 }, callback: v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%' },
+        },
+      },
+      elements: {
+        point: { radius: 0, hoverRadius: 0 },
+        line: { tension: 0 },
+      },
+    },
+    plugins: [zeroLine, highlightPlugin],
+  });
+}
+
+let fetchId = 0;
+async function fetchData() {
+  if (!active.size) { chart.data.datasets = []; chart.update(); renderCards({}); return; }
+  const id = ++fetchId;
+  document.getElementById('loader').classList.add('on');
+  try {
+    const resp = await fetch(`/api/data?period=${period}&indicators=${[...active].join(',')}`);
+    const data = await resp.json();
+    if (id !== fetchId) return;
+    updateChart(data);
+    renderCards(data);
+  } catch (e) { console.error(e); }
+  finally { if (id === fetchId) document.getElementById('loader').classList.remove('on'); }
+}
+
+function updateChart(data) {
+  chart.data.datasets = Object.entries(data)
+    .filter(([, v]) => v.data?.length)
+    .map(([k, v]) => ({
+      label: v.name,
+      _key: k,
+      _color: COLORS[k],
+      _dimmed: false,
+      data: v.data.map(d => ({ x: new Date(d.date), y: d.value, raw: d.raw, delta: d.delta })),
+      borderColor(ctx) {
+        const c = ctx.dataset._color;
+        return ctx.dataset._dimmed ? c + '30' : c;
+      },
+      backgroundColor: COLORS[k] + '15',
+      fill: false,
+      pointRadius: 0,
+      pointHoverRadius: 0,
+      borderWidth(ctx) {
+        return ctx.dataset._dimmed ? 1 : 2;
+      },
+    }));
+  chart.update('active');
+}
+
+function fmtRaw(key, raw) {
+  const u = UNIT[key] || '';
+  if (key === 'nps') return `비중 ${raw}%`;
+  if (u === '$') return `$${raw.toLocaleString()}`;
+  if (u === '₩') return `₩${raw.toLocaleString()}`;
+  if (u === 'pt') return `${raw.toLocaleString()} pt`;
+  if (u === '%') return `${raw.toFixed(2)}%`;
+  return raw.toLocaleString();
+}
+
+function renderCards(data) {
+  const el = document.getElementById('cards');
+  const ordered = indicatorConfig.filter(c => active.has(c.key));
+  el.innerHTML = ordered.map(({ key, name }) => {
+    const d = data[key];
+    if (!d || d.error || !d.latest) {
+      return `<div class="scard" style="--c:${COLORS[key]}"><div class="sl">${name}</div><div class="sv zr">✕</div><div class="se">${d?.error ? '로드 실패' : '데이터 없음'}</div></div>`;
+    }
+    const v = d.latest.value;
+    const s = v >= 0 ? '+' : '';
+    const cls = v > 0 ? 'up' : v < 0 ? 'dn' : 'zr';
+    const dv = d.latest.delta;
+    const ds = dv >= 0 ? '+' : '';
+    const dcls = dv > 0 ? 'up' : dv < 0 ? 'dn' : 'zr';
+    return `<div class="scard" style="--c:${COLORS[key]}"><div class="sl">${d.name}</div><div class="sv ${cls}">${s}${v.toFixed(2)}%</div><div class="sd ${dcls}">직전 ${ds}${dv.toFixed(2)}%</div><div class="sr">${fmtRaw(key, d.latest.raw)}</div></div>`;
+  }).join('');
+}
+
+async function saveNps() {
+  const msg = document.getElementById('npsMsg');
+  try {
+    const parsed = JSON.parse(document.getElementById('npsIn').value);
+    if (!Array.isArray(parsed)) throw new Error('배열 형식이어야 합니다');
+    const resp = await fetch('/api/nps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(parsed) });
+    const r = await resp.json();
+    if (r.ok) { msg.style.color='#10b981'; msg.textContent='저장 완료!'; fetchData(); }
+    else throw new Error(r.error);
+  } catch(e) { msg.style.color='#ef4444'; msg.textContent='오류: '+e.message; }
+}
+
+async function loadNpsIn() {
+  try { const d = await(await fetch('/api/nps')).json(); if(d.length) document.getElementById('npsIn').value=JSON.stringify(d,null,2); } catch{}
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
