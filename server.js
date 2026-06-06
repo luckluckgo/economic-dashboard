@@ -16,12 +16,15 @@ function loadConfig() {
 }
 function getEcosKey() { return loadConfig().ecosApiKey || 'sample'; }
 
-const ECOS_DAILY = {
+const ECOS_KR_BONDS = {
   kr_bond2y:  { stat: '817Y002', item1: '010195000', name: '국고채 2년 금리',  category: '한국 채권' },
   kr_bond3y:  { stat: '817Y002', item1: '010200000', name: '국고채 3년 금리',  category: '한국 채권' },
   kr_bond5y:  { stat: '817Y002', item1: '010200001', name: '국고채 5년 금리',  category: '한국 채권' },
   kr_bond10y: { stat: '817Y002', item1: '010210000', name: '국고채 10년 금리', category: '한국 채권' },
   kr_bond30y: { stat: '817Y002', item1: '010230000', name: '국고채 30년 금리', category: '한국 채권' },
+};
+
+const ECOS_KR_ECONOMY = {
   kr_base_rate: { stat: '722Y001', item1: '0101000', name: '한국 기준금리', category: '한국 경제' },
 };
 
@@ -29,6 +32,7 @@ const ECOS_MONTHLY = {
   unemployment:  { stat: '901Y027', item1: 'I61BC',   item2: 'I28B', name: '한국 실업률',   category: '한국 경제' },
   employment:    { stat: '901Y027', item1: 'I61E',    item2: 'I28B', name: '한국 고용률',   category: '한국 경제' },
   cpi:           { stat: '901Y009', item1: '0',       item2: null,  name: '한국 물가상승률', category: '한국 경제' },
+  forex_reserve: { stat: '732Y001', item1: '99',      item2: null,  name: '한국 외환보유액', category: '한국 경제' },
   us_base_rate:  { stat: '902Y006', item1: 'US',      item2: null,  name: '미국 기준금리', category: '미국 경제' },
 };
 
@@ -37,6 +41,25 @@ const BLS_INDICATORS = {
   us_unemployment: { seriesId: 'LNS14000000', name: '미국 실업률',     category: '미국 경제' },
   us_employment:   { seriesId: 'LNS12300000', name: '미국 고용률',     category: '미국 경제' },
   us_cpi:          { seriesId: 'CUSR0000SA0', name: '미국 물가상승률', category: '미국 경제' },
+};
+
+// --- EIA (미국 에너지정보청) 지표 ---
+const EIA_INDICATORS = {
+  crude_inventory:    { type: 'us', name: '미국 원유재고 (SPR 제외)', category: '원자재' },
+  kr_oil_inventory:   { type: 'kr', name: '한국 석유재고',            category: '원자재' },
+};
+
+// --- 미국 채권 (Yahoo Finance) ---
+const US_BOND_INDICATORS = {
+  us2y:     { ticker: '2YY=F',  name: '미국 국채 2년 금리',  category: '미국 채권' },
+  us5y:     { ticker: '^FVX',   name: '미국 국채 5년 금리',  category: '미국 채권' },
+  us10y:    { ticker: '^TNX',   name: '미국 국채 10년 금리', category: '미국 채권' },
+  us30y:    { ticker: '^TYX',   name: '미국 국채 30년 금리', category: '미국 채권' },
+};
+
+// --- FRED (세인트루이스 연준) 지표 ---
+const FRED_INDICATORS = {
+  fed_balance: { seriesId: 'WALCL', name: 'Fed 대차대조표', category: '미국 경제' },
 };
 
 // --- Yahoo Finance 지표 ---
@@ -51,11 +74,6 @@ const YAHOO_INDICATORS = {
   shanghai: { ticker: '000001.SS',   name: '상해종합',            category: '해외 주식' },
   dax:      { ticker: '^GDAXI',      name: 'DAX',                category: '해외 주식' },
   sox:      { ticker: '^SOX',        name: '필라델피아 반도체',     category: '해외 주식' },
-
-  us2y:     { ticker: '2YY=F',       name: '미국 국채 2년 금리',    category: '미국 채권' },
-  us5y:     { ticker: '^FVX',        name: '미국 국채 5년 금리',    category: '미국 채권' },
-  us10y:    { ticker: '^TNX',        name: '미국 국채 10년 금리',   category: '미국 채권' },
-  us30y:    { ticker: '^TYX',        name: '미국 국채 30년 금리',   category: '미국 채권' },
 
   oil:      { ticker: 'CL=F',        name: 'WTI 유가',            category: '원자재' },
   brent:    { ticker: 'BZ=F',        name: '브렌트유',             category: '원자재' },
@@ -78,11 +96,17 @@ const YAHOO_INDICATORS = {
   nps:      { ticker: null,          name: '국민연금 주식비중',      category: '기타' },
 };
 
+const ECOS_DAILY = { ...ECOS_KR_BONDS, ...ECOS_KR_ECONOMY };
+const toEntries = (obj, src) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, { ...v, source: src }]));
 const ALL_INDICATORS = {
-  ...Object.fromEntries(Object.entries(ECOS_DAILY).map(([k, v]) => [k, { ...v, source: 'ecos_daily' }])),
-  ...Object.fromEntries(Object.entries(ECOS_MONTHLY).map(([k, v]) => [k, { ...v, source: 'ecos_monthly' }])),
-  ...Object.fromEntries(Object.entries(BLS_INDICATORS).map(([k, v]) => [k, { ...v, source: 'bls' }])),
-  ...Object.fromEntries(Object.entries(YAHOO_INDICATORS).map(([k, v]) => [k, { ...v, source: 'yahoo' }])),
+  ...toEntries(ECOS_KR_BONDS, 'ecos_daily'),     // 한국 채권
+  ...toEntries(US_BOND_INDICATORS, 'yahoo'),     // 미국 채권
+  ...toEntries(ECOS_KR_ECONOMY, 'ecos_daily'),   // 한국 기준금리
+  ...toEntries(ECOS_MONTHLY, 'ecos_monthly'),    // 한국 경제 (실업률, 고용률, 물가)
+  ...toEntries(BLS_INDICATORS, 'bls'),           // 미국 경제 (실업률, 고용률, 물가)
+  ...toEntries(FRED_INDICATORS, 'fred'),         // Fed 대차대조표
+  ...toEntries(EIA_INDICATORS, 'eia'),           // 원유재고
+  ...toEntries(YAHOO_INDICATORS, 'yahoo'),       // 주식, 원자재, 환율, 암호화폐 등
 };
 
 const DEFAULT_ON = new Set(['kospi', 'kr_bond10y', 'oil', 'usdkrw']);
@@ -215,6 +239,7 @@ async function fetchBls(key, period) {
   const sorted = series
     .filter(r => r.period.startsWith('M'))
     .map(r => ({ ym: r.year + r.period.replace('M', ''), value: parseFloat(r.value), year: r.year, month: r.period.replace('M', '') }))
+    .filter(r => !isNaN(r.value))
     .sort((a, b) => a.ym.localeCompare(b.ym));
 
   let data;
@@ -232,6 +257,73 @@ async function fetchBls(key, period) {
   } else {
     data = sorted.map(r => ({ date: lastDay(r.year, r.month), close: r.value }));
   }
+
+  cache.set(cacheKey, { data, ts: Date.now() });
+  return data;
+}
+
+// --- EIA (미국 에너지정보청) 데이터 가져오기 ---
+async function fetchEia(key, period) {
+  const cacheKey = `eia:${key}:${period}:${new Date().toISOString().slice(0, 10)}`;
+  const cached = cache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data;
+
+  let url;
+  const fetchDays = FETCH_DAYS[period] || 38;
+  const start = new Date();
+  start.setDate(start.getDate() - fetchDays);
+
+  if (key === 'crude_inventory') {
+    const startStr = start.toISOString().slice(0, 10);
+    url = `https://api.eia.gov/v2/petroleum/stoc/wstk/data?api_key=DEMO_KEY&frequency=weekly&data%5B0%5D=value&facets%5Bproduct%5D%5B%5D=EPC0&facets%5Bduoarea%5D%5B%5D=NUS&facets%5Bprocess%5D%5B%5D=SAX&sort%5B0%5D%5Bcolumn%5D=period&sort%5B0%5D%5Bdirection%5D=asc&start=${startStr}&length=100`;
+  } else if (key === 'kr_oil_inventory') {
+    const startM = start.toISOString().slice(0, 7);
+    url = `https://api.eia.gov/v2/international/data?api_key=DEMO_KEY&frequency=monthly&data%5B0%5D=value&facets%5BactivityId%5D%5B%5D=5&facets%5BcountryRegionId%5D%5B%5D=KOR&sort%5B0%5D%5Bcolumn%5D=period&sort%5B0%5D%5Bdirection%5D=asc&start=${startM}&length=50`;
+  }
+
+  const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  if (!resp.ok) throw new Error(`EIA API ${resp.status}`);
+  const json = await resp.json();
+
+  const rows = json.response?.data || [];
+  let data;
+  if (key === 'kr_oil_inventory') {
+    data = rows.map(r => {
+      const ym = r.period;
+      const y = parseInt(ym.slice(0, 4)), m = parseInt(ym.slice(5, 7));
+      const lastD = new Date(y, m, 0).getDate();
+      return { date: `${ym}-${String(lastD).padStart(2, '0')}`, close: parseFloat(r.value) };
+    }).filter(d => !isNaN(d.close));
+  } else {
+    data = rows.map(r => ({ date: r.period, close: parseFloat(r.value) })).filter(d => !isNaN(d.close));
+  }
+
+  cache.set(cacheKey, { data, ts: Date.now() });
+  return data;
+}
+
+// --- FRED CSV 데이터 가져오기 ---
+async function fetchFred(key, period) {
+  const conf = FRED_INDICATORS[key];
+  const cacheKey = `fred:${key}:${period}:${new Date().toISOString().slice(0, 10)}`;
+  const cached = cache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data;
+
+  const fetchDays = FETCH_DAYS[period] || 38;
+  const start = new Date();
+  start.setDate(start.getDate() - fetchDays);
+  const startStr = start.toISOString().slice(0, 10);
+  const endStr = new Date().toISOString().slice(0, 10);
+
+  const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${conf.seriesId}&cosd=${startStr}&coed=${endStr}`;
+  const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  if (!resp.ok) throw new Error(`FRED ${resp.status}`);
+  const text = await resp.text();
+
+  const data = text.trim().split('\n').slice(1).map(line => {
+    const [date, val] = line.split(',');
+    return { date, close: parseFloat(val) };
+  }).filter(d => !isNaN(d.close) && d.date !== '.');
 
   cache.set(cacheKey, { data, ts: Date.now() });
   return data;
@@ -330,13 +422,17 @@ app.get('/api/data', async (req, res) => {
     }
     try {
       let quotes;
-      const monthly = ind.source === 'ecos_monthly' || ind.source === 'bls';
+      const monthly = ind.source === 'ecos_monthly' || ind.source === 'bls' || (ind.source === 'eia' && key === 'kr_oil_inventory');
       if (ind.source === 'ecos_daily') {
         quotes = await fetchEcosDaily(key, period);
       } else if (ind.source === 'ecos_monthly') {
         quotes = await fetchEcosMonthly(key, period);
       } else if (ind.source === 'bls') {
         quotes = await fetchBls(key, period);
+      } else if (ind.source === 'fred') {
+        quotes = await fetchFred(key, period);
+      } else if (ind.source === 'eia') {
+        quotes = await fetchEia(key, period);
       } else {
         quotes = await fetchYahoo(ind.ticker, period);
       }

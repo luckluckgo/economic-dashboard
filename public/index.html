@@ -169,12 +169,15 @@ const COLORS = {
   sp500:'#2563EB', nasdaq:'#7C3AED', nikkei:'#EC4899', hsi:'#EA580C', shanghai:'#991B1B', dax:'#059669', sox:'#6D28D9',
   kr_bond2y:'#93C5FD', kr_bond3y:'#60A5FA', kr_bond5y:'#3B82F6', kr_bond10y:'#2563EB', kr_bond30y:'#1D4ED8',
   us2y:'#67E8F9', us5y:'#22D3EE', us10y:'#0891B2', us30y:'#0E7490',
+  crude_inventory:'#B45309',
   oil:'#D97706', brent:'#92400E', gold:'#CA8A04', silver:'#64748B', natgas:'#C2410C', copper:'#78350F',
   usdkrw:'#10B981', dxy:'#0D9488', eurusd:'#0284C7', usdjpy:'#84CC16', usdcny:'#047857',
   btc:'#EA580C', eth:'#4F46E5',
   vix:'#BE185D',
-  kr_base_rate:'#7C3AED', unemployment:'#E11D48', employment:'#F43F5E', cpi:'#F97316',
+  kr_base_rate:'#7C3AED', unemployment:'#E11D48', employment:'#F43F5E', cpi:'#F97316', forex_reserve:'#059669',
+  kr_oil_inventory:'#92400E',
   us_base_rate:'#A78BFA', us_unemployment:'#FB7185', us_employment:'#FDA4AF', us_cpi:'#FDBA74',
+  fed_balance:'#818CF8',
   nps:'#8B5CF6',
 };
 
@@ -182,12 +185,15 @@ const UNIT = {
   kospi:'pt', kosdaq:'pt', sp500:'pt', nasdaq:'pt', nikkei:'pt', hsi:'pt', shanghai:'pt', dax:'pt', sox:'pt',
   kr_bond2y:'%', kr_bond3y:'%', kr_bond5y:'%', kr_bond10y:'%', kr_bond30y:'%',
   us2y:'%', us5y:'%', us10y:'%', us30y:'%',
+  crude_inventory:'천배럴',
   oil:'$', brent:'$', gold:'$', silver:'$', natgas:'$', copper:'$',
   usdkrw:'₩', dxy:'', eurusd:'', usdjpy:'¥', usdcny:'¥',
   btc:'$', eth:'$',
   vix:'',
-  kr_base_rate:'%', unemployment:'%', employment:'%', cpi:'%',
+  kr_base_rate:'%', unemployment:'%', employment:'%', cpi:'%', forex_reserve:'천$',
+  kr_oil_inventory:'백만배럴',
   us_base_rate:'%', us_unemployment:'%', us_employment:'%', us_cpi:'%',
+  fed_balance:'백만$',
   nps:'%',
 };
 
@@ -259,6 +265,15 @@ function initPeriod() {
   });
 }
 
+function findNearestPoint(ds, targetX) {
+  let best = null, bestDist = Infinity;
+  for (const pt of ds.data) {
+    const d = Math.abs(pt.x.getTime() - targetX);
+    if (d < bestDist) { bestDist = d; best = pt; }
+  }
+  return best;
+}
+
 function externalTooltip({ chart: ch, tooltip }) {
   const el = document.getElementById('extTooltip');
   if (tooltip.opacity === 0) {
@@ -269,24 +284,36 @@ function externalTooltip({ chart: ch, tooltip }) {
   const dps = tooltip.dataPoints;
   if (!dps?.length) return;
 
-  const dateStr = new Date(dps[0].parsed.x)
+  const hoverX = dps[0].parsed.x;
+  const dateStr = new Date(hoverX)
     .toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
 
-  const rows = dps.map(dp => {
-    const ds = dp.dataset;
-    const v = dp.parsed.y;
-    const delta = dp.raw.delta;
-    const k = ds._key;
+  const included = new Set(dps.map(dp => dp.datasetIndex));
+
+  const allRows = [];
+  ch.data.datasets.forEach((ds, i) => {
+    if (ch.getDatasetMeta(i).hidden) return;
     const dim = ds._dimmed;
+    let v, delta, raw, k = ds._key;
+
+    if (included.has(i)) {
+      const dp = dps.find(d => d.datasetIndex === i);
+      v = dp.parsed.y; delta = dp.raw.delta; raw = dp.raw.raw;
+    } else {
+      const pt = findNearestPoint(ds, hoverX);
+      if (!pt) return;
+      v = pt.y; delta = pt.delta; raw = pt.raw;
+    }
+
     const vS = v >= 0 ? '+' : '';
     const dS = delta >= 0 ? '+' : '';
-    return `<div class="tt-row ${dim ? 'dim' : ''}">
+    allRows.push(`<div class="tt-row ${dim ? 'dim' : ''}">
       <span class="tt-dot" style="background:${ds._color}"></span>
-      ${ds.label}: ${vS}${v.toFixed(2)}% | 직전 ${dS}${delta.toFixed(2)}%  (${fmtRaw(k, dp.raw.raw)})
-    </div>`;
-  }).join('');
+      ${ds.label}: ${vS}${v.toFixed(2)}% | 직전 ${dS}${delta.toFixed(2)}%  (${fmtRaw(k, raw)})
+    </div>`);
+  });
 
-  el.innerHTML = `<div class="tt-title">${dateStr}</div>${rows}`;
+  el.innerHTML = `<div class="tt-title">${dateStr}</div>${allRows.join('')}`;
   el.classList.add('show');
 
   const area = ch.chartArea;
@@ -320,13 +347,59 @@ function initChart() {
     },
   };
 
+  const gapMarkerPlugin = {
+    id: 'gapMarker',
+    afterDatasetsDraw(ch) {
+      const ctx = ch.ctx;
+      const dpr = window.devicePixelRatio || 1;
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      ch.data.datasets.forEach((ds, dsIdx) => {
+        const meta = ch.getDatasetMeta(dsIdx);
+        if (meta.hidden) return;
+        const pts = meta.data;
+        if (pts.length < 3) return;
+
+        const intervals = [];
+        for (let i = 1; i < pts.length; i++) {
+          intervals.push(pts[i].x - pts[i - 1].x);
+        }
+        intervals.sort((a, b) => a - b);
+        const median = intervals[Math.floor(intervals.length / 2)];
+
+        for (let i = 1; i < pts.length; i++) {
+          const gap = pts[i].x - pts[i - 1].x;
+          if (gap <= median * 1.8) continue;
+          const missing = Math.round(gap / median) - 1;
+          for (let m = 1; m <= missing; m++) {
+            const ratio = m / (missing + 1);
+            const mx = pts[i - 1].x + (pts[i].x - pts[i - 1].x) * ratio;
+            const my = pts[i - 1].y + (pts[i].y - pts[i - 1].y) * ratio;
+            const s = 3;
+            ctx.beginPath();
+            ctx.moveTo(mx - s, my - s);
+            ctx.lineTo(mx + s, my + s);
+            ctx.moveTo(mx + s, my - s);
+            ctx.lineTo(mx - s, my + s);
+            ctx.strokeStyle = ds._color + '80';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
+        }
+      });
+
+      ctx.restore();
+    },
+  };
+
   const highlightPlugin = {
     id: 'highlightNearest',
     _nearest: null,
     afterEvent(ch, args) {
       const evt = args.event;
       const datasets = ch.data.datasets;
-      if (evt.type === 'mouseout' || !ch.tooltip?.dataPoints?.length) {
+      if (evt.type === 'mouseout' || evt.type === 'click' || !ch.tooltip?.dataPoints?.length) {
         this._nearest = null;
         let dirty = false;
         datasets.forEach(ds => { if (ds._dimmed) { ds._dimmed = false; dirty = true; } });
@@ -346,7 +419,8 @@ function initChart() {
       });
       this._nearest = nearest.idx !== -1 ? nearest : null;
       datasets.forEach((ds, i) => {
-        ds._dimmed = (nearest.idx !== -1 && i !== nearest.idx);
+        const hidden = ch.getDatasetMeta(i).hidden;
+        ds._dimmed = !hidden && (nearest.idx !== -1 && i !== nearest.idx);
       });
       args.changed = true;
       externalTooltip({ chart: ch, tooltip: ch.tooltip });
@@ -354,20 +428,55 @@ function initChart() {
     afterDatasetsDraw(ch) {
       if (!this._nearest) return;
       const { idx, di } = this._nearest;
-      const el = ch.getDatasetMeta(idx).data[di];
-      if (!el) return;
-      const color = ch.data.datasets[idx]._color;
+      const hoverEl = ch.getDatasetMeta(idx).data[di];
+      if (!hoverEl) return;
+      const hoverX = hoverEl.x;
       const ctx = ch.ctx;
       const dpr = window.devicePixelRatio || 1;
       ctx.save();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.beginPath();
-      ctx.arc(el.x, el.y, 5, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = '#fff';
-      ctx.stroke();
+
+      // 각 데이터셋에 대해 hover X 위치에 가장 가까운 포인트 찾기
+      ch.data.datasets.forEach((ds, dsIdx) => {
+        if (ch.getDatasetMeta(dsIdx).hidden) return;
+        const meta = ch.getDatasetMeta(dsIdx);
+        const pts = meta.data;
+        if (!pts.length) return;
+
+        // hover X와 가장 가까운 포인트 찾기
+        let bestPt = null, bestDist = Infinity;
+        pts.forEach(pt => {
+          const d = Math.abs(pt.x - hoverX);
+          if (d < bestDist) { bestDist = d; bestPt = pt; }
+        });
+        if (!bestPt) return;
+
+        const isExact = Math.abs(bestPt.x - hoverX) < 3;
+        const color = ds._color;
+
+        if (dsIdx === idx) {
+          // hover된 라인: 큰 dot
+          ctx.beginPath();
+          ctx.arc(bestPt.x, bestPt.y, 5, 0, Math.PI * 2);
+          ctx.fillStyle = color;
+          ctx.fill();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = '#fff';
+          ctx.stroke();
+        } else if (!isExact && !ds._dimmed) {
+          // 해당 날짜에 데이터 없는 데이터셋: ✕ 표시
+          const s = 4;
+          ctx.beginPath();
+          ctx.moveTo(bestPt.x - s, bestPt.y - s);
+          ctx.lineTo(bestPt.x + s, bestPt.y + s);
+          ctx.moveTo(bestPt.x + s, bestPt.y - s);
+          ctx.lineTo(bestPt.x - s, bestPt.y + s);
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      });
+
       ctx.restore();
     },
   };
@@ -382,7 +491,30 @@ function initChart() {
       plugins: {
         legend: {
           position: 'top',
-          labels: { usePointStyle: true, pointStyle: 'circle', padding: 14, font: { size: 12, weight: '500' } },
+          labels: {
+            usePointStyle: true, pointStyle: 'circle', padding: 14,
+            font: { size: 12, weight: '500' },
+            generateLabels(ch) {
+              return ch.data.datasets.map((ds, i) => {
+                const hidden = ch.getDatasetMeta(i).hidden;
+                return {
+                  text: ds.label,
+                  fillStyle: hidden ? '#ccc' : ds._color,
+                  strokeStyle: hidden ? '#ccc' : ds._color,
+                  pointStyle: 'circle',
+                  hidden: false,
+                  datasetIndex: i,
+                };
+              });
+            },
+          },
+          onClick(e, item, legend) {
+            const ch = legend.chart;
+            const meta = ch.getDatasetMeta(item.datasetIndex);
+            meta.hidden = !meta.hidden;
+            ch.data.datasets.forEach(ds => { ds._dimmed = false; });
+            ch.update();
+          },
         },
         tooltip: {
           enabled: false,
@@ -406,7 +538,7 @@ function initChart() {
         line: { tension: 0 },
       },
     },
-    plugins: [zeroLine, highlightPlugin],
+    plugins: [zeroLine, gapMarkerPlugin, highlightPlugin],
   });
 }
 
@@ -456,6 +588,10 @@ function fmtRaw(key, raw) {
   if (u === '₩') return `₩${raw.toLocaleString()}`;
   if (u === 'pt') return `${raw.toLocaleString()} pt`;
   if (u === '%') return `${raw.toFixed(2)}%`;
+  if (u === '천배럴') return `${(raw/1000).toFixed(0)}백만배럴`;
+  if (u === '백만$') return `$${(raw/1000000).toFixed(2)}T`;
+  if (u === '천$') return `$${(raw/1000000).toFixed(1)}B`;
+  if (u === '백만배럴') return `${raw.toFixed(1)}M bbl`;
   return raw.toLocaleString();
 }
 
