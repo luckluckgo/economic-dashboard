@@ -203,7 +203,7 @@ let chart = null;
 let indicatorConfig = [];
 
 async function init() {
-  const resp = await fetch('/api/config');
+  const resp = await fetch('api/config');
   indicatorConfig = await resp.json();
   active = new Set(indicatorConfig.filter(c => c.defaultOn).map(c => c.key));
   buildPanel();
@@ -548,7 +548,7 @@ async function fetchData() {
   const id = ++fetchId;
   document.getElementById('loader').classList.add('on');
   try {
-    const resp = await fetch(`/api/data?period=${period}&indicators=${[...active].join(',')}`);
+    const resp = await fetch(`api/data?period=${period}&indicators=${[...active].join(',')}`);
     const data = await resp.json();
     if (id !== fetchId) return;
     updateChart(data);
@@ -618,7 +618,7 @@ async function saveNps() {
   try {
     const parsed = JSON.parse(document.getElementById('npsIn').value);
     if (!Array.isArray(parsed)) throw new Error('배열 형식이어야 합니다');
-    const resp = await fetch('/api/nps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(parsed) });
+    const resp = await fetch('api/nps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(parsed) });
     const r = await resp.json();
     if (r.ok) { msg.style.color='#10b981'; msg.textContent='저장 완료!'; fetchData(); }
     else throw new Error(r.error);
@@ -626,7 +626,7 @@ async function saveNps() {
 }
 
 async function loadNpsIn() {
-  try { const d = await(await fetch('/api/nps')).json(); if(d.length) document.getElementById('npsIn').value=JSON.stringify(d,null,2); } catch{}
+  try { const d = await(await fetch('api/nps')).json(); if(d.length) document.getElementById('npsIn').value=JSON.stringify(d,null,2); } catch{}
 }
 
 document.addEventListener('DOMContentLoaded', init);
