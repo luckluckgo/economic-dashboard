@@ -27,6 +27,7 @@ const ECOS_DAILY = {
 
 const ECOS_MONTHLY = {
   unemployment:  { stat: '901Y027', item1: 'I61BC',   item2: 'I28B', name: '한국 실업률',   category: '한국 경제' },
+  employment:    { stat: '901Y027', item1: 'I61E',    item2: 'I28B', name: '한국 고용률',   category: '한국 경제' },
   cpi:           { stat: '901Y009', item1: '0',       item2: null,  name: '한국 물가상승률', category: '한국 경제' },
   us_base_rate:  { stat: '902Y006', item1: 'US',      item2: null,  name: '미국 기준금리', category: '미국 경제' },
 };
@@ -34,6 +35,7 @@ const ECOS_MONTHLY = {
 // --- BLS (미국 노동통계국) 지표 ---
 const BLS_INDICATORS = {
   us_unemployment: { seriesId: 'LNS14000000', name: '미국 실업률',     category: '미국 경제' },
+  us_employment:   { seriesId: 'LNS12300000', name: '미국 고용률',     category: '미국 경제' },
   us_cpi:          { seriesId: 'CUSR0000SA0', name: '미국 물가상승률', category: '미국 경제' },
 };
 
