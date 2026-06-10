@@ -62,6 +62,17 @@ const FRED_INDICATORS = {
   fed_balance: { seriesId: 'WALCL', name: 'Fed 대차대조표', category: '미국 경제' },
 };
 
+// --- CME FedWatch (FOMC 금리 전망) ---
+// FOMC 정례회의 '발표일'(이틀째). 새 금리는 발표 다음날부터 적용.
+const FOMC_MEETINGS = [
+  '2026-01-28', '2026-03-18', '2026-04-29', '2026-06-17',
+  '2026-07-29', '2026-09-16', '2026-10-28', '2026-12-09',
+  '2027-01-27', '2027-03-17', '2027-04-28', '2027-06-16',
+  '2027-07-28', '2027-09-15', '2027-10-27', '2027-12-08',
+];
+// 30일 연방기금금리 선물(ZQ) CME 월물 코드
+const FUT_MONTH_CODE = ['F','G','H','J','K','M','N','Q','U','V','X','Z'];
+
 // --- Yahoo Finance 지표 ---
 const YAHOO_INDICATORS = {
   kospi:    { ticker: '^KS11',       name: 'KOSPI',              category: '한국 주식' },
@@ -360,6 +371,100 @@ async function fetchYahoo(ticker, period) {
   return data;
 }
 
+// --- FedWatch: Yahoo 선물 최신가 / FRED 최신값 ---
+async function fetchYahooLatest(ticker) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=10d`;
+  const resp = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' },
+  });
+  if (!resp.ok) throw new Error(`Yahoo API ${resp.status}`);
+  const json = await resp.json();
+  const result = json.chart?.result?.[0];
+  const closes = result?.indicators?.quote?.[0]?.close || [];
+  for (let i = closes.length - 1; i >= 0; i--) {
+    if (closes[i] != null) return closes[i];
+  }
+  return result?.meta?.regularMarketPrice ?? null;
+}
+
+async function fetchFredLatest(seriesId) {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - 45);
+  const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${seriesId}&cosd=${start.toISOString().slice(0, 10)}&coed=${end.toISOString().slice(0, 10)}`;
+  const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  if (!resp.ok) throw new Error(`FRED ${resp.status}`);
+  const text = await resp.text();
+  const rows = text.trim().split('\n').slice(1)
+    .map(l => l.split(','))
+    .filter(([, v]) => v && v !== '.' && !isNaN(parseFloat(v)));
+  if (!rows.length) throw new Error(`FRED ${seriesId} 데이터 없음`);
+  return parseFloat(rows.at(-1)[1]);
+}
+
+// 연방기금금리 선물 곡선으로부터 회의별 내재 확률 계산 (CME FedWatch 방식)
+function buildFedWatch(rates, effr, tgtLow, tgtHigh, today) {
+  const STEP = 0.25;
+  const upcoming = FOMC_MEETINGS.filter(d => new Date(d + 'T23:59:59') >= today).slice(0, 8);
+
+  let rStart = effr;                 // 직전(현재) 실효금리에서 시작
+  let cumDist = new Map([[0, 1]]);   // 현재 목표범위 대비 누적 step → 확률
+  const meetings = [];
+
+  for (const ann of upcoming) {
+    const d = new Date(ann + 'T00:00:00');
+    const y = d.getFullYear(), mo = d.getMonth();      // mo: 0-based
+    const N = new Date(y, mo + 1, 0).getDate();
+    const nOld = d.getDate();                          // 발표 다음날부터 신금리 → 구금리 일수 = 발표일
+    const nNew = N - nOld;
+    const ym = `${y}-${String(mo + 1).padStart(2, '0')}`;
+    const avg = rates[ym];
+    if (avg == null) continue;                         // 선물 데이터 없으면 건너뜀
+
+    // 회의 후 금리(rEnd): 회의가 월말이라 잔여일이 적으면 노이즈가 커지므로,
+    // 회의 없는 다음 달 선물(= 신금리 그대로)을 앵커로 사용
+    const nextYm = mo === 11 ? `${y + 1}-01` : `${y}-${String(mo + 2).padStart(2, '0')}`;
+    const nextHasMeeting = FOMC_MEETINGS.some(m => m.slice(0, 7) === nextYm);
+    let rEnd;
+    if (nNew >= 8 || nextHasMeeting || rates[nextYm] == null) {
+      rEnd = (avg * N - nOld * rStart) / nNew;
+    } else {
+      rEnd = rates[nextYm];
+    }
+
+    // 이번 회의 변동폭(step) → 인접 25bp 결과에 확률 배분
+    const steps = (rEnd - rStart) / STEP;
+    const lo = Math.floor(steps + 1e-9), hi = Math.ceil(steps - 1e-9);
+    const move = lo === hi ? new Map([[lo, 1]]) : new Map([[lo, hi - steps], [hi, steps - lo]]);
+
+    // 누적 분포와 convolution
+    const next = new Map();
+    for (const [s, p] of cumDist)
+      for (const [ms, mp] of move) next.set(s + ms, (next.get(s + ms) || 0) + p * mp);
+    cumDist = next;
+
+    const outcomes = [...cumDist.entries()]
+      .filter(([, p]) => p >= 0.005)
+      .sort((a, b) => a[0] - b[0])
+      .map(([s, p]) => ({
+        low: +(tgtLow + s * STEP).toFixed(2),
+        high: +(tgtHigh + s * STEP).toFixed(2),
+        steps: s,
+        prob: +(p * 100).toFixed(1),
+      }));
+
+    meetings.push({ date: ann, impliedRate: +rEnd.toFixed(3), outcomes });
+    rStart = rEnd;
+  }
+
+  const asOf = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  return {
+    asOf,
+    current: { low: tgtLow, high: tgtHigh, effr: +effr.toFixed(2) },
+    meetings,
+  };
+}
+
 function toPercentChange(quotes, period, monthly = false) {
   if (!quotes?.length) return [];
 
@@ -406,6 +511,48 @@ app.get('/api/config', (req, res) => {
     key, name: val.name, category: val.category, defaultOn: DEFAULT_ON.has(key),
   }));
   res.json(config);
+});
+
+app.get('/api/fedwatch', async (req, res) => {
+  const cacheKey = `fedwatch:${new Date().toISOString().slice(0, 13)}`;  // 1시간 단위
+  const cached = cache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < CACHE_TTL) return res.json(cached.data);
+
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // 향후 ~16개월치 선물 월물 결정 (현재 회의월 ~ 마지막 회의 다음 달)
+    const months = [];
+    const cur = new Date(today.getFullYear(), today.getMonth(), 1);
+    for (let i = 0; i < 18; i++) {
+      const m = new Date(cur.getFullYear(), cur.getMonth() + i, 1);
+      months.push({ y: m.getFullYear(), mo: m.getMonth() });
+    }
+
+    const [effr, tgtLow, tgtHigh, ...futs] = await Promise.all([
+      fetchFredLatest('EFFR'),
+      fetchFredLatest('DFEDTARL'),
+      fetchFredLatest('DFEDTARU'),
+      ...months.map(async ({ y, mo }) => {
+        const ticker = `ZQ${FUT_MONTH_CODE[mo]}${String(y).slice(2)}.CBT`;
+        try {
+          const price = await fetchYahooLatest(ticker);
+          return price == null ? null : { ym: `${y}-${String(mo + 1).padStart(2, '0')}`, rate: 100 - price };
+        } catch { return null; }
+      }),
+    ]);
+
+    const rates = {};
+    futs.filter(Boolean).forEach(f => { rates[f.ym] = f.rate; });
+
+    const data = buildFedWatch(rates, effr, tgtLow, tgtHigh, today);
+    cache.set(cacheKey, { data, ts: Date.now() });
+    res.json(data);
+  } catch (err) {
+    console.error(`[fedwatch] ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/data', async (req, res) => {
